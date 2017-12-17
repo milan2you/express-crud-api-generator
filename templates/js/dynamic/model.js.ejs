@@ -1,0 +1,11 @@
+const mongoose = require('mongoose')
+const Schema = mongoose.Schema
+
+let <%= vars.singular %>Schema = new Schema(
+  {<% for(let attribute of attributes) { %>
+    <%= attribute.name %> : {
+      type : <%= attribute.type %>},<% } %>},
+  { timestamps: {} } // auto generate createdAt and updatedAt field
+)
+
+module.exports = mongoose.model('<%= vars.capSingular %>', <%= vars.singular %>Schema)

@@ -1,0 +1,87 @@
+const <%= vars.capSingular %>Model = require('../models/<%= vars.singular %>')
+const boom = require('boom')
+
+module.exports = {
+  get<%= vars.capPlural %> : function(req, res, next) {
+    <%= vars.capSingular %>Model
+      .find()
+      .then(<%= vars.plural %> =>
+        res.status(200).json({
+          message: '<%= vars.capPlural %> get success',
+          data: <%= vars.plural %>
+        })
+      )
+      .catch(err => next(boom.internal))
+  },
+  get<%= vars.capSingular %> : function(req, res, next) {
+    <%= vars.capSingular %>Model
+      .findById(req.params.id)
+      .then(<%= vars.singular %> => {
+        if (<%= vars.singular %>) {
+          res.status(200).json({
+            message: '<%= vars.capSingular %> get success',
+            data: <%= vars.singular %>
+          })
+        } else {
+          res.status(404).json({
+            message: '<%= vars.capSingular %> not found'
+          })
+        }
+      })
+      .catch(err => next(boom.internal))
+  },
+  create<%= vars.capSingular %> : function(req, res, next) {
+    let new<%= vars.capSingular %> = new <%= vars.capSingular %>Model({
+      <% for(let attribute of attributes) { %><%= attribute.name %> : req.body.<%= attribute.name %>,<% } %>
+    })
+    new<%= vars.capSingular %>
+      .save()
+      .then(<%= vars.singular %> => {
+        res.status(200).json({
+          message: '<%= vars.capSingular %> successfully created',
+          data: <%= vars.singular %>
+        })
+      })
+      .catch(err => next(boom.internal))
+  },
+  update<%= vars.capSingular %> : function(req, res, next) {
+    <%= vars.capSingular %>Model
+      .findByIdAndUpdate(
+        req.params.id,
+        {
+          <% for(let attribute of attributes) { %><%= attribute.name %> : req.body.<%= attribute.name %>,<% } %>
+        },
+        { new: true } // return new updated document
+      )
+      .then(<%= vars.singular %> => {
+        if(<%= vars.singular %>){
+          res.status(200).json({
+            message: '<%= vars.capSingular %> successfully updated',
+            data: <%= vars.singular %>
+          })
+        }else{
+          res.status(404).json({
+            message: '<%= vars.capSingular %> not found'
+          })
+        }
+      })
+      .catch(err => next(boom.internal))
+  },
+  delete<%= vars.capSingular %> : function(req, res, next) {
+    <%= vars.capSingular %>Model
+      .findByIdAndRemove(req.params.id)
+      .then(<%= vars.singular %> => {
+        if(<%= vars.singular %>){
+          res.status(200).json({
+            message: '<%= vars.capSingular %> successfully deleted',
+            data: <%= vars.singular %>
+          })
+        }else{
+          res.status(404).json({
+            message: '<%= vars.capSingular %> not found'
+          })
+        }
+      })
+      .catch(err => next(boom.internal))
+  }
+}

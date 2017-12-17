@@ -1,0 +1,17 @@
+const router = require('express').Router()
+
+const {
+  get<%= vars.capPlural %>,
+  get<%= vars.capSingular %>,
+  create<%= vars.capSingular %>,
+  update<%= vars.capSingular %>,
+  delete<%= vars.capSingular %>,
+} = require('../controllers/<%= vars.singular %>')
+
+router.get('/', get<%= vars.capPlural %>)
+router.post('/', create<%= vars.capSingular %>)
+router.get('/:id', get<%= vars.capSingular %>)
+router.put('/:id', update<%= vars.capSingular %>)
+router.delete('/:id',delete<%= vars.capSingular %>)
+
+module.exports = router

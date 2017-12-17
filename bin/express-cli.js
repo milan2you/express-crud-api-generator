@@ -2,20 +2,30 @@
 
 var ejs = require('ejs')
 var fs = require('fs')
+var prettier = require('prettier')
 var mkdirp = require('mkdirp')
 var path = require('path')
+var nodepath = require('path')
 var program = require('commander')
 var readline = require('readline')
 var sortedObject = require('sorted-object')
 var util = require('util')
-
+const inflect = require('inflect')
 var MODE_0666 = parseInt('0666', 8)
 var MODE_0755 = parseInt('0755', 8)
+const postmanGen = require('./postmanGen')
 
 var _exit = process.exit
 var pkg = require('../package.json')
 
 var version = pkg.version
+
+let prettierConfig = {
+  semi : false,
+  trailingComma : 'none',
+  singleQuote : true
+}
+
 
 // Re-assign process.exit because of commander
 // TODO: Switch to a different command framework
@@ -44,19 +54,57 @@ before(program, 'unknownOption', function () {
   }
 })
 
+
+function parseAttributes(val){
+  return val.split(',').map(attr => {
+    let name = attr.split(':')[0].toLowerCase()
+    let type = attr.split(':')[1].toLowerCase().trim()
+    switch (type) {
+      case 'string':
+      type = 'String'
+        break;       
+      case 'objectid':
+        type = 'Schema.Types.ObjectId'
+        break;
+      case 'mixed':
+        type = 'Schema.Types.Mixed'
+        break;
+      case 'number':
+        type = 'Number'
+        break;
+      case 'date':
+        type = 'Date'
+        break;
+      case 'boolean':
+        type = 'Boolean'
+        break;
+      case 'buffer':
+        type = 'Buffer'
+        break;                          
+      default:
+        type : 'String'
+        break;
+    }
+    return {
+      name,
+      type
+    }
+  })
+}
+
 program
-  .name('express')
+  .name('express-crud-api')
   .version(version, '    --version')
   .usage('[options] [dir]')
-  .option('-e, --ejs', 'add ejs engine support', renamedOption('--ejs', '--view=ejs'))
-  .option('    --pug', 'add pug engine support', renamedOption('--pug', '--view=pug'))
-  .option('    --hbs', 'add handlebars engine support', renamedOption('--hbs', '--view=hbs'))
-  .option('-H, --hogan', 'add hogan.js engine support', renamedOption('--hogan', '--view=hogan'))
-  .option('-v, --view <engine>', 'add view <engine> support (dust|ejs|hbs|hjs|jade|pug|twig|vash) (defaults to jade)')
-  .option('-c, --css <engine>', 'add stylesheet <engine> support (less|stylus|compass|sass) (defaults to plain css)')
+  .option('    --init', 'init new project')
+  .option('    --projectname <projectname>', 'project name',inflect.dasherize)
+  .option('    --attributes <attributes>', 'schema attributes', parseAttributes)
+  .option('    --schema <schema>', 'schema name')
   .option('    --git', 'add .gitignore')
   .option('-f, --force', 'force on non-empty directory')
-  .parse(process.argv)
+
+
+program.parse(process.argv)
 
 if (!exit.exited) {
   main()
@@ -115,6 +163,20 @@ function copyTemplate (from, to) {
 }
 
 /**
+ * Infect name
+ */
+
+function inflectMe (route) {
+  return {
+    capSingular : inflect.singularize(inflect.capitalize(route)),
+    capPlural : inflect.pluralize(inflect.capitalize(route)),
+    singular : inflect.singularize(route),
+    plural : inflect.pluralize(route)
+  }
+}
+
+
+/**
  * Create application at the given directory `path`.
  *
  * @param {String} path
@@ -152,197 +214,94 @@ function createApplication (name, path) {
 
   // App modules
   app.locals.modules = Object.create(null)
+  app.locals.name = name
   app.locals.uses = []
-
-  mkdir(path, function () {
-    mkdir(path + '/public', function () {
-      mkdir(path + '/public/javascripts')
-      mkdir(path + '/public/images')
-      mkdir(path + '/public/stylesheets', function () {
-        switch (program.css) {
-          case 'less':
-            copyTemplate('css/style.less', path + '/public/stylesheets/style.less')
-            break
-          case 'stylus':
-            copyTemplate('css/style.styl', path + '/public/stylesheets/style.styl')
-            break
-          case 'compass':
-            copyTemplate('css/style.scss', path + '/public/stylesheets/style.scss')
-            break
-          case 'sass':
-            copyTemplate('css/style.sass', path + '/public/stylesheets/style.sass')
-            break
-          default:
-            copyTemplate('css/style.css', path + '/public/stylesheets/style.css')
-            break
+  if(program.init){
+    mkdir(path, function () {
+      mkdir(path + '/models')
+      mkdir(path + '/controllers')    
+      mkdir(path + '/routes',function(){
+        copyTemplate('js/routes/index.js', path + '/routes/index.js')
+      })
+      
+      // package.json
+      var pkg = {
+        name: name,
+        version: '0.1.0',
+        private: true,
+        scripts: {
+          start: 'node ./bin/www',
+          dev: `DEBUG_COLORS=false DEBUG=${name}:* NODE_ENV=development nodemon ./bin/www`
+        },
+        dependencies: {
+          'body-parser': '~1.18.2',
+          'cookie-parser': '~1.4.3',
+          'debug': '~2.6.9',
+          'express': '~4.15.5',
+          'morgan': '~1.9.0',
+          'boom' : '~7.1.1',
+          'mongoose' : '~4.13.7',
+          'cors' : '~2.8.4'
         }
+      }
+  
+      // sort dependencies like npm(1)
+      pkg.dependencies = sortedObject(pkg.dependencies)
+
+      let postman = postmanGen.init(name)
+  
+      // write files
+      write(path + '/'+inflect.dasherize(name)+'.postman_collection.json', JSON.stringify(postman, null, 2) + '\n')
+      write(path + '/package.json', JSON.stringify(pkg, null, 2) + '\n')
+      write(path + '/app.js', app.render())
+      mkdir(path + '/bin', function () {
+        write(path + '/bin/www', www.render(), MODE_0755)
         complete()
       })
-    })
-
-    mkdir(path + '/routes', function () {
-      copyTemplate('js/routes/index.js', path + '/routes/index.js')
-      copyTemplate('js/routes/users.js', path + '/routes/users.js')
-      complete()
-    })
-
-    mkdir(path + '/views', function () {
-      switch (program.view) {
-        case 'dust':
-          copyTemplate('dust/index.dust', path + '/views/index.dust')
-          copyTemplate('dust/error.dust', path + '/views/error.dust')
-          break
-        case 'ejs':
-          copyTemplate('ejs/index.ejs', path + '/views/index.ejs')
-          copyTemplate('ejs/error.ejs', path + '/views/error.ejs')
-          break
-        case 'jade':
-          copyTemplate('jade/index.jade', path + '/views/index.jade')
-          copyTemplate('jade/layout.jade', path + '/views/layout.jade')
-          copyTemplate('jade/error.jade', path + '/views/error.jade')
-          break
-        case 'hjs':
-          copyTemplate('hogan/index.hjs', path + '/views/index.hjs')
-          copyTemplate('hogan/error.hjs', path + '/views/error.hjs')
-          break
-        case 'hbs':
-          copyTemplate('hbs/index.hbs', path + '/views/index.hbs')
-          copyTemplate('hbs/layout.hbs', path + '/views/layout.hbs')
-          copyTemplate('hbs/error.hbs', path + '/views/error.hbs')
-          break
-        case 'pug':
-          copyTemplate('pug/index.pug', path + '/views/index.pug')
-          copyTemplate('pug/layout.pug', path + '/views/layout.pug')
-          copyTemplate('pug/error.pug', path + '/views/error.pug')
-          break
-        case 'twig':
-          copyTemplate('twig/index.twig', path + '/views/index.twig')
-          copyTemplate('twig/layout.twig', path + '/views/layout.twig')
-          copyTemplate('twig/error.twig', path + '/views/error.twig')
-          break
-        case 'vash':
-          copyTemplate('vash/index.vash', path + '/views/index.vash')
-          copyTemplate('vash/layout.vash', path + '/views/layout.vash')
-          copyTemplate('vash/error.vash', path + '/views/error.vash')
-          break
+  
+      if (program.git) {
+        copyTemplate('js/gitignore', path + '/.gitignore')
       }
+  
       complete()
     })
+  }
+  function loadRender(mrc, loc){
+    let template = loadTemplate('js/dynamic/'+mrc+'.js')
+    template.locals.vars = inflectMe(program.schema)
+    template.locals.attributes = program.attributes
+    let pretty = prettier.format(template.render(), prettierConfig)
+    write(path + '/'+loc+'/'+ program.schema +'.js', pretty)
 
-    // CSS Engine support
-    switch (program.css) {
-      case 'less':
-        app.locals.modules.lessMiddleware = 'less-middleware'
-        app.locals.uses.push("lessMiddleware(path.join(__dirname, 'public'))")
-        break
-      case 'stylus':
-        app.locals.modules.stylus = 'stylus'
-        app.locals.uses.push("stylus.middleware(path.join(__dirname, 'public'))")
-        break
-      case 'compass':
-        app.locals.modules.compass = 'node-compass'
-        app.locals.uses.push("compass({ mode: 'expanded' })")
-        break
-      case 'sass':
-        app.locals.modules.sassMiddleware = 'node-sass-middleware'
-        app.locals.uses.push("sassMiddleware({\n  src: path.join(__dirname, 'public'),\n  dest: path.join(__dirname, 'public'),\n  indentedSyntax: true, // true = .sass and false = .scss\n  sourceMap: true\n})")
-        break
-    }
+  }
+  if(program.schema){
+    let schema = program.schema
+    // console.log('schema',schema)
+    // let routeTemplate = loadTemplate('js/dynamic/route.js')
+    // routeTemplate.locals.vars = inflectMe(schema)
+    // routeTemplate.locals.attributes = program.attributes
+    // write(path + '/routes/'+ schema +'.js', routeTemplate.render())
 
-    // Template support
-    switch (program.view) {
-      case 'dust':
-        app.locals.modules.adaro = 'adaro'
-        app.locals.view = {
-          engine: 'dust',
-          render: 'adaro.dust()'
-        }
-        break
-      default:
-        app.locals.view = {
-          engine: program.view
-        }
-        break
-    }
+    loadRender('route', 'routes')
+    loadRender('controller', 'controllers')
+    loadRender('model', 'models')
 
-    // package.json
-    var pkg = {
-      name: name,
-      version: '0.0.0',
-      private: true,
-      scripts: {
-        start: 'node ./bin/www'
-      },
-      dependencies: {
-        'body-parser': '~1.18.2',
-        'cookie-parser': '~1.4.3',
-        'debug': '~2.6.9',
-        'express': '~4.15.5',
-        'morgan': '~1.9.0',
-        'serve-favicon': '~2.4.5'
-      }
-    }
+    // let modelTemplate = loadTemplate('js/dynamic/model.js')
+    // modelTemplate.locals.vars = inflectMe(schema)
+    // modelTemplate.locals.attributes = program.attributes
+    // write(path + '/models/'+ schema +'.js', modelTemplate.render())
 
-    switch (program.view) {
-      case 'dust':
-        pkg.dependencies.adaro = '~1.0.4'
-        break
-      case 'jade':
-        pkg.dependencies['jade'] = '~1.11.0'
-        break
-      case 'ejs':
-        pkg.dependencies['ejs'] = '~2.5.7'
-        break
-      case 'hjs':
-        pkg.dependencies['hjs'] = '~0.0.6'
-        break
-      case 'hbs':
-        pkg.dependencies['hbs'] = '~4.0.1'
-        break
-      case 'pug':
-        pkg.dependencies['pug'] = '2.0.0-beta11'
-        break
-      case 'twig':
-        pkg.dependencies['twig'] = '~0.10.3'
-        break
-      case 'vash':
-        pkg.dependencies['vash'] = '~0.12.2'
-        break
-    }
+    // let controllerTemplate = loadTemplate('js/dynamic/controller.js')
+    // controllerTemplate.locals.vars = inflectMe(schema)
+    // controllerTemplate.locals.attributes = program.attributes
+    // write(path + '/controllers/'+ schema +'.js', controllerTemplate.render())
 
-    // CSS Engine support
-    switch (program.css) {
-      case 'less':
-        pkg.dependencies['less-middleware'] = '~2.2.1'
-        break
-      case 'compass':
-        pkg.dependencies['node-compass'] = '0.2.3'
-        break
-      case 'stylus':
-        pkg.dependencies['stylus'] = '0.54.5'
-        break
-      case 'sass':
-        pkg.dependencies['node-sass-middleware'] = '0.9.8'
-        break
-    }
-
-    // sort dependencies like npm(1)
-    pkg.dependencies = sortedObject(pkg.dependencies)
-
-    // write files
-    write(path + '/package.json', JSON.stringify(pkg, null, 2) + '\n')
-    write(path + '/app.js', app.render())
-    mkdir(path + '/bin', function () {
-      write(path + '/bin/www', www.render(), MODE_0755)
-      complete()
-    })
-
-    if (program.git) {
-      copyTemplate('js/gitignore', path + '/.gitignore')
-    }
-
-    complete()
-  })
+    let postman  = JSON.parse(fs.readFileSync(path + '/' + name + '.postman_collection.json'))
+    postman.item = postman.item.concat(postmanGen.appendModel(inflectMe(schema), program.attributes))
+    write(path + '/'+inflect.dasherize(name)+'.postman_collection.json', JSON.stringify(postman, null, 2) + '\n')
+    
+    console.log(program.attributes)
+  }
 }
 
 /**
@@ -434,22 +393,27 @@ function main () {
   var destinationPath = program.args.shift() || '.'
 
   // App name
-  var appName = createAppName(path.resolve(destinationPath)) || 'hello-world'
-
-  // View engine
-  if (program.view === undefined) {
-    if (program.ejs) program.view = 'ejs'
-    if (program.hbs) program.view = 'hbs'
-    if (program.hogan) program.view = 'hjs'
-    if (program.pug) program.view = 'pug'
+  
+  if(program.init && !program.projectname){
+    console.error('missing argument --projectname')
+    exit(1)
   }
 
-  // Default view engine
-  if (program.view === undefined) {
-    warning('the default view engine will not be jade in future releases\n' +
-      "use `--view=jade' or `--help' for additional options")
-    program.view = 'jade'
+  let appName = null
+  if(program.init && program.projectname){
+    appName = createAppName(program.projectname)
   }
+
+  if(program.schema){
+    let pkg  = JSON.parse(fs.readFileSync(path.join(destinationPath, 'package.json')))
+    appName = createAppName(pkg.name)
+    
+  }
+
+  console.log('appname', appName)
+  // var appName = createAppName(path.resolve(destinationPath)) || 'hello-world'
+
+ 
 
   // Generate application
   emptyDirectory(destinationPath, function (empty) {
